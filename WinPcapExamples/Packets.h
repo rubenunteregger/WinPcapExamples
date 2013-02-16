@@ -99,11 +99,9 @@ typedef struct arp_hdr
 
 typedef struct pARPPacket
 {
-  char IFCName[MAX_BUF_SIZE + 1];
   int lReqType;
   unsigned char Eth_SrcMAC[BIN_MAC_LEN];
   unsigned char Eth_DstMAC[BIN_MAC_LEN];
-
   unsigned char ARP_LocalMAC[BIN_MAC_LEN];
   unsigned char ARP_LocalIP[BIN_IP_LEN];
   unsigned char ARP_Dst_MAC[BIN_MAC_LEN];
@@ -118,14 +116,27 @@ typedef struct SCANPARAMS
   unsigned char IFCDescr[MAX_BUF_SIZE + 1];
   char IFCString[MAX_BUF_SIZE + 1];
   int Index;
-  unsigned char GWIP[BIN_IP_LEN];
-  unsigned char GWMAC[BIN_MAC_LEN];
   unsigned char StartIP[BIN_IP_LEN];
   unsigned long StartIPNum;
   unsigned char StopIP[BIN_IP_LEN];
   unsigned long StopIPNum;
+
+  unsigned char GWIP[BIN_IP_LEN];
+  unsigned char GWIPStr[MAX_IP_LEN];
+  unsigned char GWMAC[BIN_MAC_LEN];
+  unsigned char GWMACStr[MAX_MAC_LEN];
+
   unsigned char LocalIP[BIN_IP_LEN];
+  unsigned char LocalIPStr[MAX_IP_LEN];
   unsigned char LocalMAC[BIN_MAC_LEN];
+  unsigned char LocalMACStr[MAX_MAC_LEN];
+
+  unsigned char VictimIP[BIN_IP_LEN];
+  unsigned char VictimIPStr[MAX_IP_LEN];
+  unsigned char VictimMAC[BIN_MAC_LEN];
+  unsigned char VictimMACStr[MAX_MAC_LEN];
+  
+
   void *IfcWriteHandle;
 } SCANPARAMS, *PSCANPARAMS;
 

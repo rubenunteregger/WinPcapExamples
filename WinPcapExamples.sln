@@ -19,6 +19,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ParseARPReplies", "ParseARP
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ARPPing", "ARPPing\ARPPing.vcxproj", "{4A8D6590-1B41-4CBA-B6B9-ADB6AD0BBE67}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Poisoning", "Poisoning\Poisoning.vcxproj", "{40101694-A499-41A6-8DB4-86A217FE1B65}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -61,6 +63,10 @@ Global
 		{4A8D6590-1B41-4CBA-B6B9-ADB6AD0BBE67}.Debug|Win32.Build.0 = Debug|Win32
 		{4A8D6590-1B41-4CBA-B6B9-ADB6AD0BBE67}.Release|Win32.ActiveCfg = Release|Win32
 		{4A8D6590-1B41-4CBA-B6B9-ADB6AD0BBE67}.Release|Win32.Build.0 = Release|Win32
+		{40101694-A499-41A6-8DB4-86A217FE1B65}.Debug|Win32.ActiveCfg = Debug|Win32
+		{40101694-A499-41A6-8DB4-86A217FE1B65}.Debug|Win32.Build.0 = Debug|Win32
+		{40101694-A499-41A6-8DB4-86A217FE1B65}.Release|Win32.ActiveCfg = Release|Win32
+		{40101694-A499-41A6-8DB4-86A217FE1B65}.Release|Win32.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
